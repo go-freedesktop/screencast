@@ -1,5 +1,11 @@
 # go-freedesktop/screencast
 
+[![ci](https://github.com/go-freedesktop/screencast/actions/workflows/ci.yml/badge.svg)](https://github.com/go-freedesktop/screencast/actions/workflows/ci.yml)
+[![Go Reference](https://pkg.go.dev/badge/github.com/go-freedesktop/screencast.svg)](https://pkg.go.dev/github.com/go-freedesktop/screencast)
+[![License](https://img.shields.io/badge/license-BSD--3--Clause-blue)](LICENSE)
+[![Go](https://img.shields.io/badge/go-1.26.4%2B-00ADD8)](https://go.dev/dl/)
+[![Coverage](https://img.shields.io/badge/coverage-100%25%20portable%20layer-1a7f37)](#testing)
+
 Capture the pixels of displays and windows **on Linux**, in pure Go, with
 `CGO_ENABLED=0`, without shelling out to anything.
 
@@ -186,6 +192,44 @@ go run ./cmd/sccheck -slow           # force the core GetImage path
 go run ./cmd/sccheck -raw-alpha      # skip the opaque-alpha pass
 ```
 
+## Tested against real hardware
+
+Or rather: mostly not against hardware, and that is worth saying outright. A
+capture path that has only ever run against a software framebuffer can be wrong
+in ways nothing here would report.
+
+### What was actually run
+
+| Where | What was done |
+|---|---|
+| Debian 13 cloud VM, 32 vCPU, **no GPU**, X server = `Xvfb` | every figure in **Measured**, and every self-test transcript in **Proof, not assertion** |
+| Depths 16, 24 and 30; TrueColor and DirectColor visuals | the painted self-test passes identically on all of them, because a full-scale channel widens to 255 whatever its bit width |
+| MIT-SHM 1.2 with `AttachFd`, and the core `GetImage` fallback | both exercised, and compared against each other |
+| Every other platform | the whole wire codec runs in-process over a `net.Pipe` against a scripted server, so a protocol bug fails the macOS and Windows lanes too |
+
+### Not proven
+
+- **No physical GPU, and no physical X server.** `Xvfb` renders into ordinary
+  memory. A real driver's read-back cost is the one number here that a software
+  framebuffer cannot stand in for, and the 4K figures should be read as the
+  cost of this package's own work, not of the whole path on a real display.
+- **No physical monitor, so no real RANDR 1.5 layout.** Monitor enumeration is
+  exercised against a scripted server and against `Xvfb`'s single screen; a
+  multi-head desktop, a rotated panel or a mixed-DPI arrangement has not been
+  seen.
+- **Wayland is not implemented at all**, and is stated as such above rather
+  than left to be discovered. Under Wayland this captures only through
+  Xwayland.
+- **xdg-desktop-portal / PipeWire is detected, never driven.** `Diagnose` only
+  looks; it never opens a session.
+
+### Send us hardware
+
+A machine with a real GPU, a multi-head RANDR 1.5 desktop, or a rotated panel
+would each turn one of the lines above into a measurement. If you want one
+settled, **send us the hardware** and what it shows will be listed here. Until
+then, an unverified line says so.
+
 ## Testing
 
 ```
@@ -195,6 +239,18 @@ go test -race ./...
 Xvfb :99 -screen 0 1280x800x24 -ac &
 DISPLAY=:99 SCREENCAST_LIVE=1 go test -tags integration -run Live -v ./...
 ```
+
+**Captures never go in the repository.** The live suite writes its PNG to
+`os.UserConfigDir()/go-freedesktop-screencast/captures`, or to
+`SCREENCAST_ARTIFACT_DIR` when set — and either way the directory is walked up
+to the filesystem root looking for a `.git`, and REFUSED if one is found,
+including a `.git` that is a *file*, which is what a worktree has. A capture is
+a picture of whatever the machine happened to be showing, and a `.gitignore`
+entry is not a control: it is one `git add -f` away from being published
+forever. The refusal is tested, on every platform and every lane, in
+`capturedir_test.go` — a guard that only compiles where the live suite runs is
+a guard nobody runs. The committed frame under `testdata/` was put there by
+hand, from a disposable `Xvfb`.
 
 The X11 wire codec is transport-agnostic: `internal/x11.Handshake` wraps any
 `io.ReadWriteCloser`, so the whole request/reply/error machine runs in-process

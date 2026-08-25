@@ -562,12 +562,14 @@ func TestLiveCaptureRejectsBadOptions(t *testing.T) {
 // TestLiveWriteArtefact saves one captured frame as a PNG, which is the
 // artefact a human can look at. It paints a recognisable pattern first so the
 // image says something.
+//
+// The path is not the caller's to choose freely: it comes from captureDir,
+// which puts it somewhere durable OUTSIDE every git work tree and refuses
+// anything else. See capturedir_test.go for why, and for the test that the
+// refusal really refuses.
 func TestLiveWriteArtefact(t *testing.T) {
 	liveEnv(t)
-	path := os.Getenv("SCREENCAST_ARTEFACT")
-	if path == "" {
-		t.Skip("set SCREENCAST_ARTEFACT to a path to save a captured frame")
-	}
+	path := filepath.Join(captureDir(t), "display-capture.png")
 	d := mainDisplay(t)
 	s, err := CaptureDisplay(context.Background(), d, Options{FPS: 60})
 	if err != nil {
