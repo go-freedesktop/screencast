@@ -3,7 +3,11 @@
 
 package x11
 
-import "fmt"
+import (
+	"fmt"
+
+	xproto "github.com/go-freedesktop/x11"
+)
 
 // XFIXES is how a capture gets the CURSOR. The X server does not draw the
 // pointer into the framebuffer — it is a hardware overlay or a software sprite
@@ -39,10 +43,10 @@ func (c *Conn) QueryXfixes() (*Xfixes, error) {
 	if !present {
 		return nil, nil
 	}
-	e := newEncoder(c.order)
-	e.put32(4)
-	e.put32(0)
-	hdr, _, err := c.roundTrip("XFixesQueryVersion", major, xfReqQueryVersion, e.buf)
+	e := xproto.NewEncoder(c.order)
+	e.Put32(4)
+	e.Put32(0)
+	hdr, _, err := c.roundTrip("XFixesQueryVersion", major, xfReqQueryVersion, e.Bytes())
 	if err != nil {
 		return nil, err
 	}
@@ -80,18 +84,18 @@ func (ci CursorImage) Origin() (int, int) {
 // connection's byte order, which on a little-endian connection puts them down
 // as B,G,R,A — the layout this package hands to consumers.
 func decodeCursorImage(order ByteOrder, hdr []byte, body []byte) (CursorImage, error) {
-	d := newDecoder(order, hdr)
-	d.skip(8) // response type, unused, sequence, reply length
+	d := xproto.NewDecoder(order, hdr)
+	d.Skip(8) // response type, unused, sequence, reply length
 	ci := CursorImage{
-		X:      d.get16s(),
-		Y:      d.get16s(),
-		Width:  d.get16(),
-		Height: d.get16(),
-		XHot:   d.get16(),
-		YHot:   d.get16(),
-		Serial: d.get32(),
+		X:      d.Get16s(),
+		Y:      d.Get16s(),
+		Width:  d.Get16(),
+		Height: d.Get16(),
+		XHot:   d.Get16(),
+		YHot:   d.Get16(),
+		Serial: d.Get32(),
 	}
-	if !d.ok {
+	if !d.OK() {
 		return CursorImage{}, fmt.Errorf("x11: XFixesGetCursorImage: truncated reply header")
 	}
 	n := int(ci.Width) * int(ci.Height)

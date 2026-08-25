@@ -6,13 +6,15 @@ package x11
 import (
 	"encoding/binary"
 	"fmt"
+
+	xproto "github.com/go-freedesktop/x11"
 )
 
 // dialSocket is the transport seam. It is a package variable so the dial
 // sequence above it — parse, refuse a remote host, load the cookie, hand
 // shake — is testable on every platform, including the ones with no X server
 // and no unix transport at all.
-var dialSocket = dialUnix
+var dialSocket = xproto.DialUnix
 
 // Dial opens a connection to the X server named by a DISPLAY value, loading
 // the MIT-MAGIC-COOKIE-1 from the Xauthority file and running the setup
@@ -39,7 +41,7 @@ func Dial(display string) (*Conn, Address, error) {
 	if err != nil {
 		return nil, addr, err
 	}
-	name, data, err := LoadAuthCookie(AuthFilePath(), "", addr.DisplayNumber())
+	name, data, err := xproto.LoadAuthCookie(xproto.AuthFilePath(), "", addr.DisplayNumber())
 	if err != nil {
 		_ = rw.Close()
 		return nil, addr, err

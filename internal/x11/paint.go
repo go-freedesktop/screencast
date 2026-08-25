@@ -3,6 +3,10 @@
 
 package x11
 
+import (
+	xproto "github.com/go-freedesktop/x11"
+)
+
 // This file holds the only two WRITE requests in the package.
 //
 // A capture library has no business drawing, and nothing on the capture path
@@ -46,28 +50,28 @@ const CopyFromParent = 0
 //
 // Nothing changes on screen until the window is repainted; see [Conn.ClearArea].
 func (c *Conn) SetWindowBackground(window, pixel uint32) error {
-	e := newEncoder(c.order)
-	e.put32(window)
-	e.put32(cwBackPixel)
-	e.put32(pixel)
+	e := xproto.NewEncoder(c.order)
+	e.Put32(window)
+	e.Put32(cwBackPixel)
+	e.Put32(pixel)
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return c.writeRequest(opChangeWindowAttributes, 0, e.buf)
+	return c.writeRequest(opChangeWindowAttributes, 0, e.Bytes())
 }
 
 // ClearArea repaints a rectangle of a window with its background. A zero width
 // or height means "to the far edge", so ClearArea(w, 0, 0, 0, 0) repaints the
 // whole window.
 func (c *Conn) ClearArea(window uint32, x, y int16, w, h uint16) error {
-	e := newEncoder(c.order)
-	e.put32(window)
-	e.put16(uint16(x))
-	e.put16(uint16(y))
-	e.put16(w)
-	e.put16(h)
+	e := xproto.NewEncoder(c.order)
+	e.Put32(window)
+	e.Put16(uint16(x))
+	e.Put16(uint16(y))
+	e.Put16(w)
+	e.Put16(h)
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return c.writeRequest(opClearArea, 0, e.buf)
+	return c.writeRequest(opClearArea, 0, e.Bytes())
 }
 
 // Sync waits until the server has processed every request sent so far. It
@@ -94,21 +98,21 @@ func (c *Conn) Sync() error {
 // real. Nothing on the capture path creates a window.
 func (c *Conn) CreateSolidWindow(parent uint32, x, y int16, w, h uint16, pixel uint32) (uint32, error) {
 	wid := c.NewID()
-	e := newEncoder(c.order)
-	e.put32(wid)
-	e.put32(parent)
-	e.put16(uint16(x))
-	e.put16(uint16(y))
-	e.put16(w)
-	e.put16(h)
-	e.put16(0) // border-width
-	e.put16(classInputOutput)
-	e.put32(CopyFromParent) // visual
-	e.put32(cwBackPixel | cwOverrideRedirect)
-	e.put32(pixel)
-	e.put32(1) // override-redirect
+	e := xproto.NewEncoder(c.order)
+	e.Put32(wid)
+	e.Put32(parent)
+	e.Put16(uint16(x))
+	e.Put16(uint16(y))
+	e.Put16(w)
+	e.Put16(h)
+	e.Put16(0) // border-width
+	e.Put16(classInputOutput)
+	e.Put32(CopyFromParent) // visual
+	e.Put32(cwBackPixel | cwOverrideRedirect)
+	e.Put32(pixel)
+	e.Put32(1) // override-redirect
 	c.mu.Lock()
-	err := c.writeRequest(opCreateWindow, CopyFromParent, e.buf)
+	err := c.writeRequest(opCreateWindow, CopyFromParent, e.Bytes())
 	c.mu.Unlock()
 	if err != nil {
 		return 0, err
@@ -121,18 +125,18 @@ func (c *Conn) CreateSolidWindow(parent uint32, x, y int16, w, h uint16, pixel u
 
 // MapWindow makes a window visible.
 func (c *Conn) MapWindow(window uint32) error {
-	e := newEncoder(c.order)
-	e.put32(window)
+	e := xproto.NewEncoder(c.order)
+	e.Put32(window)
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return c.writeRequest(opMapWindow, 0, e.buf)
+	return c.writeRequest(opMapWindow, 0, e.Bytes())
 }
 
 // DestroyWindow removes a window and everything below it.
 func (c *Conn) DestroyWindow(window uint32) error {
-	e := newEncoder(c.order)
-	e.put32(window)
+	e := xproto.NewEncoder(c.order)
+	e.Put32(window)
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return c.writeRequest(opDestroyWindow, 0, e.buf)
+	return c.writeRequest(opDestroyWindow, 0, e.Bytes())
 }

@@ -10,6 +10,8 @@ import (
 	"net"
 	"strings"
 	"testing"
+
+	xproto "github.com/go-freedesktop/x11"
 )
 
 func TestHandshakeSuccess(t *testing.T) {
@@ -27,7 +29,7 @@ func TestHandshakeSuccess(t *testing.T) {
 		}
 		// The setup request the server saw must carry the auth blob.
 		setup := f.requests()[0]
-		if !strings.Contains(string(setup.Body), AuthMITCookie) {
+		if !strings.Contains(string(setup.Body), xproto.AuthMITCookie) {
 			t.Errorf("setup request did not carry the auth name: % x", setup.Body)
 		}
 	}
@@ -139,14 +141,14 @@ func shortPipe(t *testing.T, reply []byte) io.ReadWriteCloser {
 }
 
 func TestTrimNul(t *testing.T) {
-	if got := trimNul([]byte("abc\x00def")); got != "abc" {
+	if got := xproto.TrimNul([]byte("abc\x00def")); got != "abc" {
 		t.Errorf("trimNul = %q", got)
 	}
-	if got := trimNul([]byte("abc")); got != "abc" {
+	if got := xproto.TrimNul([]byte("abc")); got != "abc" {
 		t.Errorf("trimNul with no NUL = %q", got)
 	}
-	if got := trimNul(nil); got != "" {
-		t.Errorf("trimNul(nil) = %q", got)
+	if got := xproto.TrimNul(nil); got != "" {
+		t.Errorf("xproto.TrimNul(nil) = %q", got)
 	}
 }
 

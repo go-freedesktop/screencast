@@ -3,7 +3,9 @@
 
 package x11
 
-import "fmt"
+import (
+	xproto "github.com/go-freedesktop/x11"
+)
 
 // This file implements the client side of the MIT-SHM extension, version 1.2,
 // in the direction a capture needs: ShmGetImage.
@@ -88,26 +90,26 @@ func shmAtLeast(maj, min, wantMaj, wantMin uint16) bool {
 // WRITE into it, so a capture passes false. The server takes ownership of the
 // passed descriptor and closes its copy on Detach.
 func (s *Shm) AttachFd(seg uint32, fd int, readOnly bool) error {
-	e := newEncoder(s.c.order)
-	e.put32(seg)
+	e := xproto.NewEncoder(s.c.order)
+	e.Put32(seg)
 	ro := byte(0)
 	if readOnly {
 		ro = 1
 	}
-	e.put8(ro)
-	e.skip(3) // unused
+	e.Put8(ro)
+	e.Skip(3) // unused
 	s.c.mu.Lock()
 	defer s.c.mu.Unlock()
-	return s.c.writeRequestFD(s.major, shmReqAttachFd, e.buf, fd)
+	return s.c.writeRequestFD(s.major, shmReqAttachFd, e.Bytes(), fd)
 }
 
 // Detach releases a previously attached segment.
 func (s *Shm) Detach(seg uint32) error {
-	e := newEncoder(s.c.order)
-	e.put32(seg)
+	e := xproto.NewEncoder(s.c.order)
+	e.Put32(seg)
 	s.c.mu.Lock()
 	defer s.c.mu.Unlock()
-	return s.c.writeRequest(s.major, shmReqDetach, e.buf)
+	return s.c.writeRequest(s.major, shmReqDetach, e.Bytes())
 }
 
 // encodeGetImage builds the ShmGetImage request body. It is split out so the
@@ -115,18 +117,18 @@ func (s *Shm) Detach(seg uint32) error {
 // the segment and the offset.
 func encodeGetImage(order ByteOrder, drawable uint32, x, y int16, w, h uint16,
 	seg, offset uint32) []byte {
-	e := newEncoder(order)
-	e.put32(drawable)
-	e.put16(uint16(x))
-	e.put16(uint16(y))
-	e.put16(w)
-	e.put16(h)
-	e.put32(AllPlanes)
-	e.put8(imageFormatZPixmap)
-	e.skip(3) // unused
-	e.put32(seg)
-	e.put32(offset)
-	return e.buf
+	e := xproto.NewEncoder(order)
+	e.Put32(drawable)
+	e.Put16(uint16(x))
+	e.Put16(uint16(y))
+	e.Put16(w)
+	e.Put16(h)
+	e.Put32(AllPlanes)
+	e.Put8(imageFormatZPixmap)
+	e.Skip(3) // unused
+	e.Put32(seg)
+	e.Put32(offset)
+	return e.Bytes()
 }
 
 // GetImage asks the server to write the w×h rectangle of drawable at (x, y)
@@ -150,58 +152,4 @@ func (s *Shm) GetImage(drawable uint32, x, y int16, w, h uint16, seg, offset uin
 		Visual: s.c.order.Uint32(s.c.hdr[8:12]),
 		Bytes:  int(s.c.order.Uint32(s.c.hdr[12:16])),
 	}, nil
-}
-
-// Segment is a mapped anonymous shared-memory region backing a MIT-SHM
-// attachment: Data is the pixel store both peers see, FD is the descriptor
-// handed to the X server by [Shm.AttachFd], and Seg is the resource id the
-// server knows it by.
-//
-// The lifecycle is transport-agnostic; the shared-memory syscalls themselves
-// live behind createAnonFile/mmapRegion/munmapRegion/closeFD, which are
-// provided per platform. Off Linux there is no X server to attach to, so
-// createAnonFile reports an error and no segment is ever created.
-type Segment struct {
-	Seg  uint32
-	FD   int
-	Data []byte
-	size int
-}
-
-// NewSegment allocates and maps a shared-memory segment of size bytes and
-// assigns it the resource id seg. The caller registers it with the server via
-// [Shm.AttachFd] and frees it with [Segment.Close].
-func NewSegment(seg uint32, size int) (*Segment, error) {
-	fd, err := createAnonFile(size)
-	if err != nil {
-		return nil, err
-	}
-	data, err := mmapRegion(fd, size)
-	if err != nil {
-		_ = closeFD(fd)
-		return nil, fmt.Errorf("x11: shm mmap: %w", err)
-	}
-	return &Segment{Seg: seg, FD: fd, Data: data, size: size}, nil
-}
-
-// Size returns the segment's byte length.
-func (s *Segment) Size() int { return s.size }
-
-// Close unmaps the region and closes its descriptor, returning the first
-// error; both steps are attempted regardless. It is idempotent.
-func (s *Segment) Close() error {
-	var first error
-	if s.Data != nil {
-		if err := munmapRegion(s.Data); err != nil && first == nil {
-			first = err
-		}
-		s.Data = nil
-	}
-	if s.FD >= 0 {
-		if err := closeFD(s.FD); err != nil && first == nil {
-			first = err
-		}
-		s.FD = -1
-	}
-	return first
 }

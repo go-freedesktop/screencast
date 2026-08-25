@@ -3,7 +3,11 @@
 
 package x11
 
-import "fmt"
+import (
+	"fmt"
+
+	xproto "github.com/go-freedesktop/x11"
+)
 
 // This file enumerates the MONITORS of an X screen.
 //
@@ -76,10 +80,10 @@ func (c *Conn) QueryRandr() (*Randr, error) {
 	if !present {
 		return nil, nil
 	}
-	e := newEncoder(c.order)
-	e.put32(1)
-	e.put32(5)
-	hdr, _, err := c.roundTrip("RRQueryVersion", major, rrReqQueryVersion, e.buf)
+	e := xproto.NewEncoder(c.order)
+	e.Put32(1)
+	e.Put32(5)
+	hdr, _, err := c.roundTrip("RRQueryVersion", major, rrReqQueryVersion, e.Bytes())
 	if err != nil {
 		return nil, err
 	}
@@ -100,27 +104,27 @@ func (r *Randr) HasMonitors() bool {
 // decodeMonitors parses the MONITORINFO list of an RRGetMonitors reply. Each
 // entry is a fixed 24-byte head followed by ncrtcs 4-byte output ids.
 func decodeMonitors(order ByteOrder, count int, body []byte) ([]Monitor, error) {
-	d := newDecoder(order, body)
+	d := xproto.NewDecoder(order, body)
 	out := make([]Monitor, 0, count)
 	for i := 0; i < count; i++ {
 		var m Monitor
-		m.NameAtom = d.get32()
-		m.Primary = d.get8() != 0
-		m.Automatic = d.get8() != 0
-		n := int(d.get16())
-		m.X = d.get16s()
-		m.Y = d.get16s()
-		m.Width = d.get16()
-		m.Height = d.get16()
-		m.WidthMM = d.get32()
-		m.HeightMM = d.get32()
+		m.NameAtom = d.Get32()
+		m.Primary = d.Get8() != 0
+		m.Automatic = d.Get8() != 0
+		n := int(d.Get16())
+		m.X = d.Get16s()
+		m.Y = d.Get16s()
+		m.Width = d.Get16()
+		m.Height = d.Get16()
+		m.WidthMM = d.Get32()
+		m.HeightMM = d.Get32()
 		if n > 0 {
 			m.Outputs = make([]uint32, 0, n)
 			for j := 0; j < n; j++ {
-				m.Outputs = append(m.Outputs, d.get32())
+				m.Outputs = append(m.Outputs, d.Get32())
 			}
 		}
-		if !d.ok {
+		if !d.OK() {
 			return nil, fmt.Errorf("x11: RRGetMonitors: truncated monitor %d of %d", i, count)
 		}
 		out = append(out, m)
@@ -132,11 +136,11 @@ func decodeMonitors(order ByteOrder, count int, body []byte) ([]Monitor, error) 
 // resolved from their atoms, so a monitor comes back as "HDMI-1" rather than
 // as a number.
 func (r *Randr) GetMonitors(root uint32) ([]Monitor, error) {
-	e := newEncoder(r.c.order)
-	e.put32(root)
-	e.put8(1) // get-active: only monitors currently driving pixels
-	e.skip(3)
-	hdr, extra, err := r.c.roundTrip("RRGetMonitors", r.major, rrReqGetMonitors, e.buf)
+	e := xproto.NewEncoder(r.c.order)
+	e.Put32(root)
+	e.Put8(1) // get-active: only monitors currently driving pixels
+	e.Skip(3)
+	hdr, extra, err := r.c.roundTrip("RRGetMonitors", r.major, rrReqGetMonitors, e.Bytes())
 	if err != nil {
 		return nil, err
 	}
@@ -178,11 +182,11 @@ func (c *Conn) QueryXinerama() (*Xinerama, error) {
 	if !present {
 		return nil, nil
 	}
-	e := newEncoder(c.order)
-	e.put8(1)
-	e.put8(1)
-	e.skip(2)
-	hdr, _, err := c.roundTrip("XineramaQueryVersion", major, xinReqQueryVersion, e.buf)
+	e := xproto.NewEncoder(c.order)
+	e.Put8(1)
+	e.Put8(1)
+	e.Skip(2)
+	hdr, _, err := c.roundTrip("XineramaQueryVersion", major, xinReqQueryVersion, e.Bytes())
 	if err != nil {
 		return nil, err
 	}
@@ -197,16 +201,16 @@ func (c *Conn) QueryXinerama() (*Xinerama, error) {
 // decodeXineramaScreens parses the ScreenInfo list of a QueryScreens reply:
 // count entries of four INT16/CARD16 fields each.
 func decodeXineramaScreens(order ByteOrder, count int, body []byte) ([]Monitor, error) {
-	d := newDecoder(order, body)
+	d := xproto.NewDecoder(order, body)
 	out := make([]Monitor, 0, count)
 	for i := 0; i < count; i++ {
 		m := Monitor{
-			X:      d.get16s(),
-			Y:      d.get16s(),
-			Width:  d.get16(),
-			Height: d.get16(),
+			X:      d.Get16s(),
+			Y:      d.Get16s(),
+			Width:  d.Get16(),
+			Height: d.Get16(),
 		}
-		if !d.ok {
+		if !d.OK() {
 			return nil, fmt.Errorf("x11: XineramaQueryScreens: truncated screen %d of %d", i, count)
 		}
 		out = append(out, m)

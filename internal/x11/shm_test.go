@@ -6,7 +6,6 @@ package x11
 import (
 	"encoding/binary"
 	"errors"
-	"strings"
 	"testing"
 	"time"
 )
@@ -242,100 +241,10 @@ func TestShmAttachFdSendFailure(t *testing.T) {
 	}
 }
 
-func TestSegmentLifecycle(t *testing.T) {
-	// The syscalls are behind package variables, so the segment lifecycle —
-	// allocate, map, close twice — is exercised on every platform with a
-	// heap-backed stand-in for the shared memory.
-	origAnon, origMmap, origMunmap, origClose := createAnonFile, mmapRegion, munmapRegion, closeFD
-	t.Cleanup(func() {
-		createAnonFile, mmapRegion, munmapRegion, closeFD = origAnon, origMmap, origMunmap, origClose
-	})
-
-	var unmapped, closed int
-	createAnonFile = func(size int) (int, error) { return 7, nil }
-	mmapRegion = func(fd, size int) ([]byte, error) { return make([]byte, size), nil }
-	munmapRegion = func(b []byte) error { unmapped++; return nil }
-	closeFD = func(fd int) error { closed++; return nil }
-
-	seg, err := NewSegment(0x200001, 4096)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if seg.Seg != 0x200001 || seg.FD != 7 || len(seg.Data) != 4096 || seg.Size() != 4096 {
-		t.Fatalf("Segment = %+v", seg)
-	}
-	if err := seg.Close(); err != nil {
-		t.Fatal(err)
-	}
-	if unmapped != 1 || closed != 1 {
-		t.Errorf("Close unmapped %d and closed %d, want 1 and 1", unmapped, closed)
-	}
-	// Close is idempotent: a second call must not unmap or close again.
-	if err := seg.Close(); err != nil {
-		t.Fatal(err)
-	}
-	if unmapped != 1 || closed != 1 {
-		t.Errorf("a second Close unmapped %d and closed %d", unmapped, closed)
-	}
-}
-
-func TestSegmentAllocationFailures(t *testing.T) {
-	origAnon, origMmap, origMunmap, origClose := createAnonFile, mmapRegion, munmapRegion, closeFD
-	t.Cleanup(func() {
-		createAnonFile, mmapRegion, munmapRegion, closeFD = origAnon, origMmap, origMunmap, origClose
-	})
-
-	createAnonFile = func(size int) (int, error) { return -1, errors.New("no space") }
-	if _, err := NewSegment(1, 16); err == nil {
-		t.Error("NewSegment succeeded despite a failed allocation")
-	}
-
-	var closedFDs []int
-	createAnonFile = func(size int) (int, error) { return 9, nil }
-	mmapRegion = func(fd, size int) ([]byte, error) { return nil, errors.New("mmap refused") }
-	closeFD = func(fd int) error { closedFDs = append(closedFDs, fd); return nil }
-	_, err := NewSegment(1, 16)
-	if err == nil || !strings.Contains(err.Error(), "mmap") {
-		t.Fatalf("NewSegment reported %v, want an mmap failure", err)
-	}
-	if len(closedFDs) != 1 || closedFDs[0] != 9 {
-		t.Errorf("a failed mmap leaked the descriptor: closed %v", closedFDs)
-	}
-}
-
-func TestSegmentCloseReportsTheFirstError(t *testing.T) {
-	origAnon, origMmap, origMunmap, origClose := createAnonFile, mmapRegion, munmapRegion, closeFD
-	t.Cleanup(func() {
-		createAnonFile, mmapRegion, munmapRegion, closeFD = origAnon, origMmap, origMunmap, origClose
-	})
-	createAnonFile = func(size int) (int, error) { return 3, nil }
-	mmapRegion = func(fd, size int) ([]byte, error) { return make([]byte, size), nil }
-	unmapErr := errors.New("munmap refused")
-	closeErr := errors.New("close refused")
-	munmapRegion = func([]byte) error { return unmapErr }
-	closed := false
-	closeFD = func(int) error { closed = true; return closeErr }
-	seg, err := NewSegment(1, 16)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := seg.Close(); !errors.Is(err, unmapErr) {
-		t.Errorf("Close reported %v, want the munmap error", err)
-	}
-	if !closed {
-		t.Error("Close skipped the descriptor after the unmap failed")
-	}
-
-	// And when only the close fails, that is what comes back.
-	munmapRegion = func([]byte) error { return nil }
-	seg2, err := NewSegment(1, 16)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := seg2.Close(); !errors.Is(err, closeErr) {
-		t.Errorf("Close reported %v, want the close error", err)
-	}
-}
+// The Segment lifecycle -- allocate, map, close twice, and each failure of
+// those -- moved to github.com/go-freedesktop/x11 with the segment itself, and
+// is proved there on every platform. What stays here is MIT-SHM: the requests
+// that hand a segment to the server and ask it to fill one.
 
 func TestShmRequestsOverAClosedConnection(t *testing.T) {
 	order := binary.LittleEndian
