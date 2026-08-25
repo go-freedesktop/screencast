@@ -21,6 +21,13 @@ set -euo pipefail
 
 profile="${1:?usage: coverage-gate.sh <coverage profile>}"
 
+# Read the profile ONCE. Doing it per file would be slower and would interleave
+# the tool's own diagnostics with the report.
+if ! funcs=$(go tool cover -func="$profile"); then
+  echo "::error::could not read the coverage profile $profile"
+  exit 1
+fi
+
 portable=(
   '/screencast.go:'
   '/stream.go:'
@@ -33,24 +40,23 @@ portable=(
 
 status=0
 for file in "${portable[@]}"; do
-  lines=$(go tool cover -func="$profile" | grep -F "$file" || true)
+  lines=$(printf '%s\n' "$funcs" | grep -F -- "$file" || true)
   if [ -z "$lines" ]; then
     # A file that does not build on this platform contributes nothing, which
     # is expected for the stubs on Linux and for the Linux files elsewhere.
-    echo "skip  $file (not built on this platform)"
+    printf 'skip  %s (not built on this platform)\n' "$file"
     continue
   fi
-  below=$(echo "$lines" | grep -v '100.0%' || true)
+  below=$(printf '%s\n' "$lines" | grep -v '100.0%' || true)
   if [ -n "$below" ]; then
-    echo "::error::$file is below 100%:"
-    echo "$below"
+    printf '::error::%s is below 100%%:\n' "$file"
+    printf '%s\n' "$below"
     status=1
   else
-    echo "ok    $file 100%"
+    printf 'ok    %s 100%%\n' "$file"
   fi
 done
 
-echo
-echo "whole-package coverage:"
-go tool cover -func="$profile" | tail -1
+printf '\nwhole-package coverage:\n'
+printf '%s\n' "$funcs" | tail -1
 exit "$status"
