@@ -240,6 +240,18 @@ Xvfb :99 -screen 0 1280x800x24 -ac &
 DISPLAY=:99 SCREENCAST_LIVE=1 go test -tags integration -run Live -v ./...
 ```
 
+**Captures never go in the repository.** The live suite writes its PNG to
+`os.UserConfigDir()/go-freedesktop-screencast/captures`, or to
+`SCREENCAST_ARTIFACT_DIR` when set — and either way the directory is walked up
+to the filesystem root looking for a `.git`, and REFUSED if one is found,
+including a `.git` that is a *file*, which is what a worktree has. A capture is
+a picture of whatever the machine happened to be showing, and a `.gitignore`
+entry is not a control: it is one `git add -f` away from being published
+forever. The refusal is tested, on every platform and every lane, in
+`capturedir_test.go` — a guard that only compiles where the live suite runs is
+a guard nobody runs. The committed frame under `testdata/` was put there by
+hand, from a disposable `Xvfb`.
+
 The X11 wire codec is transport-agnostic: `internal/x11.Handshake` wraps any
 `io.ReadWriteCloser`, so the whole request/reply/error machine runs in-process
 over a `net.Pipe` against a scripted fake server. That is why a protocol bug is
