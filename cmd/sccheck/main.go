@@ -234,13 +234,29 @@ func measure(ctx context.Context, s frameSource, n int, pngPath string,
 
 // benchFrameNs times Stream.Frame, which is the call a compositor makes every
 // frame and which must not allocate.
+//
+// It keeps doubling the batch until the elapsed time is well past the clock's
+// own resolution. A fixed iteration count is not enough: Frame is tens of
+// nanoseconds, and on a platform whose clock ticks every 15 ms a batch that
+// finishes inside one tick measures as exactly zero.
 func benchFrameNs(s frameSource) float64 {
-	const iters = 100000
-	start := time.Now()
-	for i := 0; i < iters; i++ {
-		s.Frame()
+	const (
+		minElapsed = 20 * time.Millisecond
+		maxIters   = 1 << 24
+	)
+	for iters := 1 << 12; ; iters *= 2 {
+		start := time.Now()
+		for i := 0; i < iters; i++ {
+			s.Frame()
+		}
+		elapsed := time.Since(start)
+		if elapsed >= minElapsed || iters >= maxIters {
+			if elapsed <= 0 {
+				return 0
+			}
+			return float64(elapsed.Nanoseconds()) / float64(iters)
+		}
 	}
-	return float64(time.Since(start).Nanoseconds()) / iters
 }
 
 // checksum is a cheap content hash of a frame, used only to tell one frame

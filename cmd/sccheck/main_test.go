@@ -338,8 +338,14 @@ func TestMeasureReportsAShortCopyTarget(t *testing.T) {
 
 func TestBenchFrameNs(t *testing.T) {
 	src := &scriptedSource{frames: varyingFrames(1, 4, 4, 16)}
-	if got := benchFrameNs(src); got <= 0 {
-		t.Errorf("benchFrameNs = %v, want a positive duration", got)
+	got := benchFrameNs(src)
+	if got < 0 {
+		t.Errorf("benchFrameNs = %v, want a non-negative duration", got)
+	}
+	// A per-call figure in the hundreds of nanoseconds or more would mean the
+	// batch loop is not amortising the clock, which is the whole point of it.
+	if got > 10_000 {
+		t.Errorf("benchFrameNs = %v ns/op for a trivial source; the timing loop is wrong", got)
 	}
 }
 
