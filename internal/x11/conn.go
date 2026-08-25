@@ -4,10 +4,11 @@
 package x11
 
 import (
-	"encoding/binary"
 	"fmt"
 	"io"
 	"sync"
+
+	xproto "github.com/go-freedesktop/x11"
 )
 
 // Conn is a connection to an X11 server speaking the core protocol over an
@@ -61,89 +62,6 @@ func (e *XError) Error() string {
 		op, name, e.Major, e.Minor, e.BadValue, e.Seq)
 }
 
-// Handshake runs the client connection setup over rw: it sends the byte-order
-// sentinel, protocol 11.0 and the authorization name and data, then parses the
-// reply. order selects the wire byte order; both are valid and the server
-// adopts the client's choice.
-func Handshake(rw io.ReadWriteCloser, order ByteOrder, authName string, authData []byte) (*Conn, error) {
-	sentinel := byte(orderMSB)
-	if order == binary.LittleEndian {
-		sentinel = orderLSB
-	}
-	req := buildSetupRequest(order, sentinel, authName, authData)
-	if _, err := rw.Write(req); err != nil {
-		return nil, err
-	}
-
-	var hdr [8]byte
-	if err := readFull(rw, hdr[:]); err != nil {
-		return nil, err
-	}
-	status := hdr[0]
-	// The additional-data length, in 4-byte units, sits at bytes 6..7 in the
-	// client's chosen order.
-	addLen := int(order.Uint16(hdr[6:8])) * 4
-	body := make([]byte, addLen)
-	if err := readFull(rw, body); err != nil {
-		return nil, err
-	}
-
-	switch status {
-	case 0: // Failed
-		reasonLen := int(hdr[1])
-		reason := ""
-		if reasonLen <= len(body) {
-			reason = string(body[:reasonLen])
-		}
-		return nil, &SetupError{Reason: reason}
-	case 2: // Authenticate
-		return nil, &SetupError{Reason: trimNul(body), Authenticate: true}
-	case 1: // Success
-	default:
-		return nil, fmt.Errorf("x11: unknown setup status %d", status)
-	}
-
-	s, err := parseSetupReply(order, body)
-	if err != nil {
-		return nil, err
-	}
-	s.ProtoMajor = order.Uint16(hdr[2:4])
-	s.ProtoMinor = order.Uint16(hdr[4:6])
-	return &Conn{
-		rw:      rw,
-		order:   order,
-		setup:   s,
-		xidBase: s.ResourceIDBase,
-		xidMask: s.ResourceIDMask,
-	}, nil
-}
-
-// SetupError is the connection-setup refusal: the server would not talk to us
-// at all. Reason is the server's own wording, which for a missing or wrong
-// cookie is "No protocol specified" or "Authorization required".
-type SetupError struct {
-	Reason       string
-	Authenticate bool // the server asked for further authentication
-}
-
-// Error renders the refusal.
-func (e *SetupError) Error() string {
-	if e.Authenticate {
-		return fmt.Sprintf("x11: server requires further authentication: %s", e.Reason)
-	}
-	return fmt.Sprintf("x11: server refused the connection: %s", e.Reason)
-}
-
-// trimNul returns b up to its first NUL, as a string.
-func trimNul(b []byte) string {
-	for i, c := range b {
-		if c == 0 {
-			return string(b[:i])
-		}
-	}
-	return string(b)
-}
-
 // Setup returns the parsed server setup.
 func (c *Conn) Setup() *Setup { return c.setup }
 
@@ -188,17 +106,6 @@ func (c *Conn) writeRequest(opcode, data byte, body []byte) error {
 	return nil
 }
 
-// FDSender is implemented by a transport that can pass a file descriptor
-// alongside a request over the same socket, via SCM_RIGHTS. The production
-// unix transport implements it; the in-process net.Pipe transport used by most
-// tests does not, so the MIT-SHM AttachFd path degrades to plain GetImage when
-// it is absent.
-type FDSender interface {
-	// SendFD writes one already-framed request with fd attached as a single
-	// SCM_RIGHTS control message.
-	SendFD(msg []byte, fd int) error
-}
-
 // SupportsFDPassing reports whether the transport can pass a descriptor to the
 // server, which MIT-SHM 1.2 AttachFd requires.
 func (c *Conn) SupportsFDPassing() bool {
@@ -214,12 +121,12 @@ func (c *Conn) writeRequestFD(opcode, data byte, body []byte, fd int) error {
 		return fmt.Errorf("x11: transport does not support fd passing")
 	}
 	total := 4 + len(body)
-	e := newEncoder(c.order)
-	e.put8(opcode)
-	e.put8(data)
-	e.put16(uint16(total / 4))
-	e.putBytes(body)
-	if err := fw.SendFD(e.buf, fd); err != nil {
+	e := xproto.NewEncoder(c.order)
+	e.Put8(opcode)
+	e.Put8(data)
+	e.Put16(uint16(total / 4))
+	e.PutBytes(body)
+	if err := fw.SendFD(e.Bytes(), fd); err != nil {
 		return err
 	}
 	c.seq++
@@ -233,7 +140,7 @@ func (c *Conn) writeRequestFD(opcode, data byte, body []byte, fd int) error {
 // The caller holds c.mu.
 func (c *Conn) readReply(op string, extra []byte) ([]byte, error) {
 	for {
-		if err := readFull(c.rw, c.hdr[:]); err != nil {
+		if err := xproto.ReadFull(c.rw, c.hdr[:]); err != nil {
 			return nil, err
 		}
 		switch c.hdr[0] {
@@ -249,7 +156,7 @@ func (c *Conn) readReply(op string, extra []byte) ([]byte, error) {
 				buf = make([]byte, n)
 			}
 			buf = buf[:n]
-			if err := readFull(c.rw, buf); err != nil {
+			if err := xproto.ReadFull(c.rw, buf); err != nil {
 				return nil, err
 			}
 			return buf, nil
@@ -272,13 +179,13 @@ func (c *Conn) readReply(op string, extra []byte) ([]byte, error) {
 
 // decodeError parses the 32-byte error packet sitting in c.hdr.
 func (c *Conn) decodeError(op string) *XError {
-	d := newDecoder(c.order, c.hdr[:])
-	d.skip(1) // 0
-	code := d.get8()
-	seq := d.get16()
-	bad := d.get32()
-	minor := d.get16()
-	major := d.get8()
+	d := xproto.NewDecoder(c.order, c.hdr[:])
+	d.Skip(1) // 0
+	code := d.Get8()
+	seq := d.Get16()
+	bad := d.Get32()
+	minor := d.Get16()
+	major := d.Get8()
 	return &XError{Code: code, Name: ErrorName(code), Seq: seq, BadValue: bad,
 		Minor: minor, Major: major, Op: op}
 }
@@ -302,11 +209,11 @@ func (c *Conn) roundTrip(op string, opcode, data byte, body []byte) (hdr [32]byt
 // implements it and, if so, its major opcode plus its first event and error
 // codes. It is the standard gate before using any extension's requests.
 func (c *Conn) QueryExtension(name string) (present bool, major, firstEvent, firstError byte, err error) {
-	e := newEncoder(c.order)
-	e.put16(uint16(len(name)))
-	e.skip(2) // unused
-	e.putString(name)
-	hdr, _, err := c.roundTrip("QueryExtension", opQueryExtension, 0, e.buf)
+	e := xproto.NewEncoder(c.order)
+	e.Put16(uint16(len(name)))
+	e.Skip(2) // unused
+	e.PutString(name)
+	hdr, _, err := c.roundTrip("QueryExtension", opQueryExtension, 0, e.Bytes())
 	if err != nil {
 		return false, 0, 0, 0, err
 	}
@@ -316,15 +223,15 @@ func (c *Conn) QueryExtension(name string) (present bool, major, firstEvent, fir
 // InternAtom resolves — or, when onlyIfExists is false, creates — an atom by
 // name.
 func (c *Conn) InternAtom(name string, onlyIfExists bool) (uint32, error) {
-	e := newEncoder(c.order)
-	e.put16(uint16(len(name)))
-	e.skip(2) // unused
-	e.putString(name)
+	e := xproto.NewEncoder(c.order)
+	e.Put16(uint16(len(name)))
+	e.Skip(2) // unused
+	e.PutString(name)
 	data := byte(0)
 	if onlyIfExists {
 		data = 1
 	}
-	hdr, _, err := c.roundTrip("InternAtom", opInternAtom, data, e.buf)
+	hdr, _, err := c.roundTrip("InternAtom", opInternAtom, data, e.Bytes())
 	if err != nil {
 		return 0, err
 	}
@@ -333,9 +240,9 @@ func (c *Conn) InternAtom(name string, onlyIfExists bool) (uint32, error) {
 
 // GetAtomName resolves an atom back to its name.
 func (c *Conn) GetAtomName(atom uint32) (string, error) {
-	e := newEncoder(c.order)
-	e.put32(atom)
-	hdr, extra, err := c.roundTrip("GetAtomName", opGetAtomName, 0, e.buf)
+	e := xproto.NewEncoder(c.order)
+	e.Put32(atom)
+	hdr, extra, err := c.roundTrip("GetAtomName", opGetAtomName, 0, e.Bytes())
 	if err != nil {
 		return "", err
 	}
@@ -358,22 +265,22 @@ type Geometry struct {
 
 // GetGeometry reads a drawable's geometry.
 func (c *Conn) GetGeometry(drawable uint32) (Geometry, error) {
-	e := newEncoder(c.order)
-	e.put32(drawable)
-	hdr, _, err := c.roundTrip("GetGeometry", opGetGeometry, 0, e.buf)
+	e := xproto.NewEncoder(c.order)
+	e.Put32(drawable)
+	hdr, _, err := c.roundTrip("GetGeometry", opGetGeometry, 0, e.Bytes())
 	if err != nil {
 		return Geometry{}, err
 	}
-	d := newDecoder(c.order, hdr[:])
-	d.skip(1)
-	g := Geometry{Depth: d.get8()}
-	d.skip(6) // sequence + reply length
-	g.Root = d.get32()
-	g.X = d.get16s()
-	g.Y = d.get16s()
-	g.Width = d.get16()
-	g.Height = d.get16()
-	g.BorderWidth = d.get16()
+	d := xproto.NewDecoder(c.order, hdr[:])
+	d.Skip(1)
+	g := Geometry{Depth: d.Get8()}
+	d.Skip(6) // sequence + reply length
+	g.Root = d.Get32()
+	g.X = d.Get16s()
+	g.Y = d.Get16s()
+	g.Width = d.Get16()
+	g.Height = d.Get16()
+	g.BorderWidth = d.Get16()
 	return g, nil
 }
 
@@ -391,28 +298,28 @@ func (a WindowAttributes) Viewable() bool { return a.MapState == MapStateViewabl
 
 // GetWindowAttributes reads a window's visual, class and map state.
 func (c *Conn) GetWindowAttributes(window uint32) (WindowAttributes, error) {
-	e := newEncoder(c.order)
-	e.put32(window)
-	hdr, _, err := c.roundTrip("GetWindowAttributes", opGetWindowAttributes, 0, e.buf)
+	e := xproto.NewEncoder(c.order)
+	e.Put32(window)
+	hdr, _, err := c.roundTrip("GetWindowAttributes", opGetWindowAttributes, 0, e.Bytes())
 	if err != nil {
 		return WindowAttributes{}, err
 	}
-	d := newDecoder(c.order, hdr[:])
-	d.skip(8) // response type, backing-store, sequence, reply length
-	a := WindowAttributes{Visual: d.get32(), Class: d.get16()}
-	d.skip(2 + 4 + 4) // bit/win gravity, backing-planes, backing-pixel
-	d.skip(2)         // save-under, map-is-installed
-	a.MapState = d.get8()
-	a.OverrideRedirect = d.get8() != 0
+	d := xproto.NewDecoder(c.order, hdr[:])
+	d.Skip(8) // response type, backing-store, sequence, reply length
+	a := WindowAttributes{Visual: d.Get32(), Class: d.Get16()}
+	d.Skip(2 + 4 + 4) // bit/win gravity, backing-planes, backing-pixel
+	d.Skip(2)         // save-under, map-is-installed
+	a.MapState = d.Get8()
+	a.OverrideRedirect = d.Get8() != 0
 	return a, nil
 }
 
 // QueryTree returns a window's root, parent and children, bottom-most first
 // as the server states them.
 func (c *Conn) QueryTree(window uint32) (root, parent uint32, children []uint32, err error) {
-	e := newEncoder(c.order)
-	e.put32(window)
-	hdr, extra, err := c.roundTrip("QueryTree", opQueryTree, 0, e.buf)
+	e := xproto.NewEncoder(c.order)
+	e.Put32(window)
+	hdr, extra, err := c.roundTrip("QueryTree", opQueryTree, 0, e.Bytes())
 	if err != nil {
 		return 0, 0, nil, err
 	}
@@ -457,20 +364,20 @@ func (p Property) Text() string {
 	if p.Format != 8 {
 		return ""
 	}
-	return trimNul(p.Value)
+	return xproto.TrimNul(p.Value)
 }
 
 // GetProperty reads up to maxWords 32-bit words of a window property. A
 // property that does not exist comes back with Format 0 and no value, which is
 // not an error.
 func (c *Conn) GetProperty(window, property, typ uint32, maxWords uint32) (Property, error) {
-	e := newEncoder(c.order)
-	e.put32(window)
-	e.put32(property)
-	e.put32(typ)
-	e.put32(0) // long-offset
-	e.put32(maxWords)
-	hdr, extra, err := c.roundTrip("GetProperty", opGetProperty, 0, e.buf)
+	e := xproto.NewEncoder(c.order)
+	e.Put32(window)
+	e.Put32(property)
+	e.Put32(typ)
+	e.Put32(0) // long-offset
+	e.Put32(maxWords)
+	hdr, extra, err := c.roundTrip("GetProperty", opGetProperty, 0, e.Bytes())
 	if err != nil {
 		return Property{}, err
 	}
@@ -500,12 +407,12 @@ func (c *Conn) GetProperty(window, property, typ uint32, maxWords uint32) (Prope
 
 // TranslateCoordinates maps (x, y) in src's coordinate space into dst's.
 func (c *Conn) TranslateCoordinates(src, dst uint32, x, y int16) (dx, dy int16, child uint32, err error) {
-	e := newEncoder(c.order)
-	e.put32(src)
-	e.put32(dst)
-	e.put16(uint16(x))
-	e.put16(uint16(y))
-	hdr, _, err := c.roundTrip("TranslateCoordinates", opTranslateCoordinate, 0, e.buf)
+	e := xproto.NewEncoder(c.order)
+	e.Put32(src)
+	e.Put32(dst)
+	e.Put16(uint16(x))
+	e.Put16(uint16(y))
+	hdr, _, err := c.roundTrip("TranslateCoordinates", opTranslateCoordinate, 0, e.Bytes())
 	if err != nil {
 		return 0, 0, 0, err
 	}
@@ -527,9 +434,9 @@ type Pointer struct {
 
 // QueryPointer reads the pointer position relative to the given window's root.
 func (c *Conn) QueryPointer(window uint32) (Pointer, error) {
-	e := newEncoder(c.order)
-	e.put32(window)
-	hdr, _, err := c.roundTrip("QueryPointer", opQueryPointer, 0, e.buf)
+	e := xproto.NewEncoder(c.order)
+	e.Put32(window)
+	hdr, _, err := c.roundTrip("QueryPointer", opQueryPointer, 0, e.Bytes())
 	if err != nil {
 		return Pointer{}, err
 	}
@@ -563,14 +470,14 @@ type ImageReply struct {
 func (c *Conn) GetImage(drawable uint32, x, y int16, w, h uint16, dst []byte) (ImageReply, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	e := newEncoder(c.order)
-	e.put32(drawable)
-	e.put16(uint16(x))
-	e.put16(uint16(y))
-	e.put16(w)
-	e.put16(h)
-	e.put32(AllPlanes)
-	if err := c.writeRequest(opGetImage, imageFormatZPixmap, e.buf); err != nil {
+	e := xproto.NewEncoder(c.order)
+	e.Put32(drawable)
+	e.Put16(uint16(x))
+	e.Put16(uint16(y))
+	e.Put16(w)
+	e.Put16(h)
+	e.Put32(AllPlanes)
+	if err := c.writeRequest(opGetImage, imageFormatZPixmap, e.Bytes()); err != nil {
 		return ImageReply{}, err
 	}
 	extra, err := c.readReply("GetImage", dst)

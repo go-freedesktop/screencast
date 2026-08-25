@@ -11,6 +11,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	xproto "github.com/go-freedesktop/x11"
 )
 
 // This file builds a SCRIPTED X SERVER in process.
@@ -118,13 +120,13 @@ func (f *fakeX) serveSetup() bool {
 	if _, err := io.ReadFull(f.srv, head[:]); err != nil {
 		return false
 	}
-	order, ok := orderFor(head[0])
+	order, ok := xproto.OrderFor(head[0])
 	if !ok {
 		return false
 	}
 	nameLen := int(order.Uint16(head[6:8]))
 	dataLen := int(order.Uint16(head[8:10]))
-	rest := make([]byte, pad4(nameLen)+pad4(dataLen))
+	rest := make([]byte, xproto.Pad4(nameLen)+xproto.Pad4(dataLen))
 	if len(rest) > 0 {
 		if _, err := io.ReadFull(f.srv, rest); err != nil {
 			return false
@@ -136,7 +138,7 @@ func (f *fakeX) serveSetup() bool {
 
 	body := f.setupBody
 	if f.setupStatus != 1 {
-		body = append([]byte(f.setupReason), make([]byte, padding(len(f.setupReason)))...)
+		body = append([]byte(f.setupReason), make([]byte, xproto.Padding(len(f.setupReason)))...)
 	}
 	var reply []byte
 	reply = append(reply, f.setupStatus, byte(len(f.setupReason)))
@@ -279,68 +281,68 @@ type depthSpec struct {
 // buildSetupBody encodes a setup reply body, which is the exact inverse of
 // parseSetupReply and lets a test round-trip any server description.
 func buildSetupBody(order binary.ByteOrder, s setupSpec) []byte {
-	e := newEncoder(order)
-	e.put32(s.Release)
-	e.put32(s.ResourceIDBase)
-	e.put32(s.ResourceIDMask)
-	e.put32(256) // motion-buffer-size
-	e.put16(uint16(len(s.Vendor)))
+	e := xproto.NewEncoder(order)
+	e.Put32(s.Release)
+	e.Put32(s.ResourceIDBase)
+	e.Put32(s.ResourceIDMask)
+	e.Put32(256) // motion-buffer-size
+	e.Put16(uint16(len(s.Vendor)))
 	max := s.MaxRequestLen
 	if max == 0 {
 		max = 65535
 	}
-	e.put16(max)
-	e.put8(uint8(len(s.Screens)))
-	e.put8(uint8(len(s.Formats)))
-	e.put8(s.ImageByteOrder)
-	e.put8(0) // bitmap-bit-order
-	e.put8(32)
-	e.put8(32)
-	e.put8(8)   // min-keycode
-	e.put8(255) // max-keycode
-	e.skip(4)
-	e.putString(s.Vendor)
+	e.Put16(max)
+	e.Put8(uint8(len(s.Screens)))
+	e.Put8(uint8(len(s.Formats)))
+	e.Put8(s.ImageByteOrder)
+	e.Put8(0) // bitmap-bit-order
+	e.Put8(32)
+	e.Put8(32)
+	e.Put8(8)   // min-keycode
+	e.Put8(255) // max-keycode
+	e.Skip(4)
+	e.PutString(s.Vendor)
 	for _, f := range s.Formats {
-		e.put8(f.Depth)
-		e.put8(f.BitsPerPix)
-		e.put8(f.ScanlinePad)
-		e.skip(5)
+		e.Put8(f.Depth)
+		e.Put8(f.BitsPerPix)
+		e.Put8(f.ScanlinePad)
+		e.Skip(5)
 	}
 	for _, sc := range s.Screens {
-		e.put32(sc.Root)
-		e.put32(sc.Colormap)
-		e.put32(sc.White)
-		e.put32(sc.Black)
-		e.put32(0) // current-input-masks
-		e.put16(sc.Width)
-		e.put16(sc.Height)
-		e.put16(sc.WidthMM)
-		e.put16(sc.HeightMM)
-		e.put16(1)
-		e.put16(1)
-		e.put32(sc.RootVisual)
-		e.put8(0)
-		e.put8(0)
-		e.put8(sc.RootDepth)
-		e.put8(uint8(len(sc.Depths)))
+		e.Put32(sc.Root)
+		e.Put32(sc.Colormap)
+		e.Put32(sc.White)
+		e.Put32(sc.Black)
+		e.Put32(0) // current-input-masks
+		e.Put16(sc.Width)
+		e.Put16(sc.Height)
+		e.Put16(sc.WidthMM)
+		e.Put16(sc.HeightMM)
+		e.Put16(1)
+		e.Put16(1)
+		e.Put32(sc.RootVisual)
+		e.Put8(0)
+		e.Put8(0)
+		e.Put8(sc.RootDepth)
+		e.Put8(uint8(len(sc.Depths)))
 		for _, dp := range sc.Depths {
-			e.put8(dp.Depth)
-			e.skip(1)
-			e.put16(uint16(len(dp.Visuals)))
-			e.skip(4)
+			e.Put8(dp.Depth)
+			e.Skip(1)
+			e.Put16(uint16(len(dp.Visuals)))
+			e.Skip(4)
 			for _, v := range dp.Visuals {
-				e.put32(v.ID)
-				e.put8(v.Class)
-				e.put8(v.BitsPerRGB)
-				e.put16(v.ColormapEnt)
-				e.put32(v.RedMask)
-				e.put32(v.GreenMask)
-				e.put32(v.BlueMask)
-				e.skip(4)
+				e.Put32(v.ID)
+				e.Put8(v.Class)
+				e.Put8(v.BitsPerRGB)
+				e.Put16(v.ColormapEnt)
+				e.Put32(v.RedMask)
+				e.Put32(v.GreenMask)
+				e.Put32(v.BlueMask)
+				e.Skip(4)
 			}
 		}
 	}
-	return e.buf
+	return e.Bytes()
 }
 
 // dialFake starts a scripted server with the given handler and returns a
@@ -357,7 +359,7 @@ func dialFakeOrder(t *testing.T, order binary.ByteOrder,
 	f, cli := newFakeX(t, order)
 	f.setHandler(h)
 	f.serve()
-	c, err := Handshake(cli, order, AuthMITCookie, []byte("0123456789abcdef"))
+	c, err := Handshake(cli, order, xproto.AuthMITCookie, []byte("0123456789abcdef"))
 	if err != nil {
 		t.Fatalf("Handshake: %v", err)
 	}

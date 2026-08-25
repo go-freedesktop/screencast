@@ -7,31 +7,33 @@ import (
 	"encoding/binary"
 	"strings"
 	"testing"
+
+	xproto "github.com/go-freedesktop/x11"
 )
 
 // monitorInfo encodes one MONITORINFO, which is what RRGetMonitors returns a
 // list of.
 func monitorInfo(order ByteOrder, nameAtom uint32, primary bool, x, y int16,
 	w, h uint16, outputs ...uint32) []byte {
-	e := newEncoder(order)
-	e.put32(nameAtom)
+	e := xproto.NewEncoder(order)
+	e.Put32(nameAtom)
 	if primary {
-		e.put8(1)
+		e.Put8(1)
 	} else {
-		e.put8(0)
+		e.Put8(0)
 	}
-	e.put8(1) // automatic
-	e.put16(uint16(len(outputs)))
-	e.put16(uint16(x))
-	e.put16(uint16(y))
-	e.put16(w)
-	e.put16(h)
-	e.put32(510)
-	e.put32(290)
+	e.Put8(1) // automatic
+	e.Put16(uint16(len(outputs)))
+	e.Put16(uint16(x))
+	e.Put16(uint16(y))
+	e.Put16(w)
+	e.Put16(h)
+	e.Put32(510)
+	e.Put32(290)
 	for _, o := range outputs {
-		e.put32(o)
+		e.Put32(o)
 	}
-	return e.buf
+	return e.Bytes()
 }
 
 func TestDecodeMonitors(t *testing.T) {
@@ -107,7 +109,7 @@ func randrServer(t *testing.T, order ByteOrder, verMajor, verMinor uint32,
 			}
 			fixed := make([]byte, 24)
 			order.PutUint16(fixed[0:2], uint16(len(n)))
-			return reply(order, 0, fixed, append([]byte(n), make([]byte, padding(len(n)))...))
+			return reply(order, 0, fixed, append([]byte(n), make([]byte, xproto.Padding(len(n)))...))
 		}
 		return errorPacket(order, ErrCodeRequest, 0, op, 0)
 	}
@@ -229,16 +231,16 @@ func TestGetMonitorsErrors(t *testing.T) {
 
 func TestDecodeXineramaScreens(t *testing.T) {
 	order := binary.LittleEndian
-	e := newEncoder(order)
-	e.put16(0)
-	e.put16(0)
-	e.put16(1024)
-	e.put16(768)
-	e.put16(1024)
-	e.put16(0)
-	e.put16(1280)
-	e.put16(1024)
-	mons, err := decodeXineramaScreens(order, 2, e.buf)
+	e := xproto.NewEncoder(order)
+	e.Put16(0)
+	e.Put16(0)
+	e.Put16(1024)
+	e.Put16(768)
+	e.Put16(1024)
+	e.Put16(0)
+	e.Put16(1280)
+	e.Put16(1024)
+	mons, err := decodeXineramaScreens(order, 2, e.Bytes())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -246,7 +248,7 @@ func TestDecodeXineramaScreens(t *testing.T) {
 		mons[1].X != 1024 || mons[1].Height != 1024 || mons[1].Primary {
 		t.Fatalf("decodeXineramaScreens = %+v", mons)
 	}
-	if _, err := decodeXineramaScreens(order, 3, e.buf); err == nil {
+	if _, err := decodeXineramaScreens(order, 3, e.Bytes()); err == nil {
 		t.Error("decodeXineramaScreens accepted a count larger than the body")
 	}
 	if got, err := decodeXineramaScreens(order, 0, nil); err != nil || len(got) != 0 {
@@ -286,12 +288,12 @@ func xineramaServer(t *testing.T, order ByteOrder, screens []byte, count int,
 
 func TestQueryXinerama(t *testing.T) {
 	order := binary.LittleEndian
-	e := newEncoder(order)
-	e.put16(0)
-	e.put16(0)
-	e.put16(1024)
-	e.put16(768)
-	c, _ := dialFake(t, xineramaServer(t, order, e.buf, 1, false))
+	e := xproto.NewEncoder(order)
+	e.Put16(0)
+	e.Put16(0)
+	e.Put16(1024)
+	e.Put16(768)
+	c, _ := dialFake(t, xineramaServer(t, order, e.Bytes(), 1, false))
 	x, err := c.QueryXinerama()
 	if err != nil || x == nil {
 		t.Fatalf("QueryXinerama = %+v, %v", x, err)
@@ -353,12 +355,12 @@ func TestMonitorsPrefersRandr(t *testing.T) {
 
 func TestMonitorsFallsBackToXinerama(t *testing.T) {
 	order := binary.LittleEndian
-	e := newEncoder(order)
-	e.put16(0)
-	e.put16(0)
-	e.put16(1024)
-	e.put16(768)
-	c, _ := dialFake(t, xineramaServer(t, order, e.buf, 1, false))
+	e := xproto.NewEncoder(order)
+	e.Put16(0)
+	e.Put16(0)
+	e.Put16(1024)
+	e.Put16(768)
+	c, _ := dialFake(t, xineramaServer(t, order, e.Bytes(), 1, false))
 	mons, err := c.Monitors(0)
 	if err != nil {
 		t.Fatal(err)

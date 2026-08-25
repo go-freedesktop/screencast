@@ -10,6 +10,8 @@ import (
 	"fmt"
 
 	"github.com/go-freedesktop/screencast/internal/x11"
+
+	xproto "github.com/go-freedesktop/x11"
 )
 
 // CaptureDisplay starts a stream on a display.
@@ -255,7 +257,7 @@ func newSource(c *x11.Conn, spec sourceSpec, opt Options) (*built, error) {
 type x11Grabber struct {
 	conn *x11.Conn
 	shm  *x11.Shm
-	segs []*x11.Segment
+	segs []*xproto.Segment
 
 	// raw is where the server writes: the mapped shared segment on the fast
 	// path, a heap buffer on the slow one. bgra is where the BGRA pixels end
@@ -339,9 +341,9 @@ func (g *x11Grabber) attachShm(size int) error {
 			shm.VerMajor, shm.VerMinor)
 	}
 	g.shm = shm
-	g.segs = make([]*x11.Segment, 0, g.n)
+	g.segs = make([]*xproto.Segment, 0, g.n)
 	for i := 0; i < g.n; i++ {
-		seg, err := x11.NewSegment(g.conn.NewID(), size)
+		seg, err := xproto.NewSegment(g.conn.NewID(), size)
 		if err != nil {
 			return err
 		}
