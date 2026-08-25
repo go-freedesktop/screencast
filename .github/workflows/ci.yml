@@ -1,0 +1,158 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CGO_ENABLED: "0"
+
+jobs:
+  # A workflow that fails to PARSE reports nothing at all: no red cross, no
+  # run, just silence. actionlint is what turns that silence into a failure.
+  actionlint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: actionlint
+        run: |
+          go install github.com/rhysd/actionlint/cmd/actionlint@latest
+          "$(go env GOPATH)/bin/actionlint" -color
+
+  gofmt:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+      - name: gofmt
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "::error::these files are not gofmt-clean:"; echo "$unformatted"
+            exit 1
+          fi
+      - name: go.mod is tidy
+        run: |
+          go mod tidy
+          git diff --exit-code go.mod go.sum
+
+  # The real X11 lane. It runs an Xvfb with no window manager, which is the
+  # harder of the two enumeration paths (there is no _NET_CLIENT_LIST, so the
+  # window tree is walked), and then runs the live suite: the one that PAINTS a
+  # known colour and requires every captured pixel to be exactly that colour,
+  # in BGRA order, at the declared stride.
+  linux:
+    name: linux (real X server, CGO=0)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+      - name: Install Xvfb
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq xvfb
+      - run: go vet ./...
+      - run: go build ./...
+      - name: The integration suite must at least COMPILE
+        run: go vet -tags integration ./...
+      - name: Unit tests
+        run: go test -count=1 -coverprofile=cover.out ./...
+      - name: 100% coverage gate on the portable layer
+        shell: bash
+        run: ./.github/coverage-gate.sh cover.out
+      - name: Race (CGO=1)
+        run: CGO_ENABLED=1 go test -race -count=1 ./...
+        env:
+          CGO_ENABLED: "1"
+      - name: Start Xvfb
+        run: |
+          Xvfb :99 -screen 0 1280x800x24 -ac >/tmp/xvfb.log 2>&1 &
+          for _ in $(seq 1 50); do
+            if [ -e /tmp/.X11-unix/X99 ]; then break; fi
+            sleep 0.2
+          done
+          test -e /tmp/.X11-unix/X99
+      - name: Live capture suite
+        run: go test -tags integration -count=1 -run Live -v ./...
+        env:
+          DISPLAY: ":99"
+          SCREENCAST_LIVE: "1"
+      - name: The paint self-test through the CLI
+        run: go run ./cmd/sccheck -selftest -frames 20 -fps 200
+        env:
+          DISPLAY: ":99"
+      - name: The paint self-test on the GetImage fallback
+        run: go run ./cmd/sccheck -selftest -slow -frames 20 -fps 200
+        env:
+          DISPLAY: ":99"
+      - name: Coverage with a display (the whole package)
+        run: |
+          go test -tags integration -count=1 -coverprofile=live.out ./...
+          go tool cover -func=live.out | tail -1
+        env:
+          DISPLAY: ":99"
+          SCREENCAST_LIVE: "1"
+
+  # Every non-Linux platform must COMPILE and answer ErrUnsupported rather than
+  # failing to build: a consumer cross-compiles this without thinking about it.
+  cross:
+    name: cross ${{ matrix.goos }}/${{ matrix.goarch }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { goos: linux, goarch: amd64 }
+          - { goos: linux, goarch: arm64 }
+          - { goos: darwin, goarch: amd64 }
+          - { goos: darwin, goarch: arm64 }
+          - { goos: windows, goarch: amd64 }
+          - { goos: windows, goarch: arm64 }
+          - { goos: freebsd, goarch: amd64 }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+      - run: go build ./...
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+      - run: go vet ./...
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+
+  # The stub lanes. They matter because the ENTIRE X11 wire codec is portable
+  # and is exercised here against an in-process scripted server, with no X
+  # server anywhere: a protocol bug shows up on macOS and on Windows too.
+  darwin:
+    name: darwin (stubs + the whole wire codec)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+      - run: go test -count=1 -coverprofile=cover.out ./...
+      - name: 100% coverage gate on the portable layer
+        shell: bash
+        run: ./.github/coverage-gate.sh cover.out
+
+  windows:
+    name: windows (stubs + the whole wire codec)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+      - run: go test -count=1 ./...
