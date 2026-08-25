@@ -17,10 +17,14 @@ import (
 // has nothing to do with what the client is FOR, and two copies of a wire
 // protocol parser drift silently until something fails on one back-end only.
 //
-// What stays here is the half that IS about capture: the request/reply machine
-// tuned for one GetImage per frame with no allocation, the RANDR and XINERAMA
-// monitor enumerations, the XFIXES cursor, MIT-SHM in the GetImage direction,
-// and the pixel conversion.
+// The RANDR 1.5 and XINERAMA monitor enumerations went the same way, for the
+// same reason: which display is where is not a capture question, and window
+// needs the identical answer to put something full-screen on a chosen panel.
+// See monitors.go for the adapter that is all that remains of them here.
+//
+// What stays is the half that IS about capture: the request/reply machine
+// tuned for one GetImage per frame with no allocation, the XFIXES cursor,
+// MIT-SHM in the GetImage direction, and the pixel conversion.
 //
 // These aliases are names, not copies — x11.Setup and xproto.Setup are the same
 // type — so the capture code above reads as it always did.
