@@ -111,6 +111,14 @@ passing, core `GetImage` fallback, MIT-MAGIC-COOKIE-1 authorization, RANDR 1.5
 and XINERAMA monitor enumeration, XFIXES cursor, every TrueColor and
 DirectColor visual at 16, 24 and 32 bits per pixel.
 
+The wire codec, the `.Xauthority` parser, the setup exchange, the shared-memory
+segment and the monitor enumeration are not owned here: they are
+[`go-freedesktop/x11`](https://github.com/go-freedesktop/x11), shared with
+[`go-widgets/window`](https://github.com/go-widgets/window). Which display is
+where is not a capture question — a toolkit putting a window full-screen on a
+chosen panel needs the identical answer — and two copies of a protocol parser
+drift silently until something fails on one back-end only.
+
 **Wayland — not implemented.** A wlroots compositor exposing
 `wlr-screencopy-unstable-v1` could be driven the same way. It is not done here.
 Under Wayland, capture works only through Xwayland.
