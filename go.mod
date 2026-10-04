@@ -1,6 +1,6 @@
 module github.com/go-freedesktop/screencast
 
-go 1.26.4
+go 1.27.1
 
 require (
 	github.com/go-freedesktop/x11 v0.2.0
