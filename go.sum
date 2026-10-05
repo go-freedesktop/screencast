@@ -1,5 +1,5 @@
-github.com/go-freedesktop/x11 v0.2.0 h1:qHvov5jn7GG4QxeealqRJVj72/MjR5qi2IXqyD7N02A=
-github.com/go-freedesktop/x11 v0.2.0/go.mod h1:a+Fma9oOlsagw0CJKe+VHYxIl5/PzPSmlCVaYCtUSYA=
+github.com/go-freedesktop/x11 v0.3.0 h1:DAZN7uAt8eQOyav90VduelaEJyTdWlAZjOTZOKvumxM=
+github.com/go-freedesktop/x11 v0.3.0/go.mod h1:6GsirPySzG8JmIhqUYc0bDcMfrXuaGf9iRsOWSP8JsU=
 github.com/godbus/dbus/v5 v5.2.2 h1:TUR3TgtSVDmjiXOgAAyaZbYmIeP3DPkld3jgKGV8mXQ=
 github.com/godbus/dbus/v5 v5.2.2/go.mod h1:3AAv2+hPq5rdnr5txxxRwiGjPXamgoIHgz9FPBfOp3c=
 golang.org/x/sys v0.27.0 h1:wBqf8DvsY9Y/2P8gAfPDEYNuS30J4lPHJxXSb/nJZ+s=
